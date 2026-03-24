@@ -16,7 +16,7 @@ const appointmentsContainer = quantumcareDB.container("appointments")
 
 /* ---------------- HELPERS ---------------- */
 
-function detectSpecialty(symptoms: string) {
+function detectSpecialty(symptoms: string): string {
   const text = symptoms.toLowerCase()
 
   if (text.includes("chest") || text.includes("heart"))
@@ -32,18 +32,25 @@ function detectSpecialty(symptoms: string) {
 }
 
 const phoneRegex = /^\+?[0-9]{10,15}$/
-const greetings = ["hello","hi","hey"]
+const greetings = ["hello", "hi", "hey"]
+
+/* ---------------- TYPES ---------------- */
+
+type Message = {
+  role: string
+  content: string
+}
 
 /* ---------------- API ---------------- */
 
 export async function POST(req: Request) {
   try {
+    const body = await req.json().catch(() => ({}))
+    const messages: Message[] = body.messages || []
 
-    const body = await req.json().catch(()=>({}))
-    const messages = body.messages || []
     const lastMessage = messages[messages.length - 1]?.content || ""
 
-    const userMessages = messages.filter((m:any)=>m.role==="user")
+    const userMessages = messages.filter((m) => m.role === "user")
 
     /* ====================================================
        DYNAMIC PARSING
@@ -58,14 +65,13 @@ export async function POST(req: Request) {
 
       if (!name && text.split(" ").length >= 2 && !phoneRegex.test(text)) {
         name = m.content
-      } 
-      else if (!phone && phoneRegex.test(text)) {
+      } else if (!phone && phoneRegex.test(text)) {
         phone = m.content
-      } 
-      else if (
-        name && phone &&
+      } else if (
+        name &&
+        phone &&
         !phoneRegex.test(text) &&
-        !["yes","no"].includes(text) &&
+        !["yes", "no"].includes(text) &&
         !text.match(/^\d+$/) &&
         !text.match(/^\d+\.\d+$/)
       ) {
@@ -77,9 +83,9 @@ export async function POST(req: Request) {
        GREETING
     ==================================================== */
 
-    if(greetings.includes(lastMessage.toLowerCase())){
+    if (greetings.includes(lastMessage.toLowerCase())) {
       return Response.json({
-        reply:"👩‍⚕️ Welcome to QuantumCare! Please enter patient name."
+        reply: "👩‍⚕️ Welcome to QuantumCare! Please enter patient name."
       })
     }
 
@@ -87,15 +93,15 @@ export async function POST(req: Request) {
        NAME
     ==================================================== */
 
-    if(!name){
+    if (!name) {
       return Response.json({
-        reply:"👤 Please enter patient name (first & last)."
+        reply: "👤 Please enter patient name (first & last)."
       })
     }
 
-    if(name.split(" ").length < 2){
+    if (name.split(" ").length < 2) {
       return Response.json({
-        reply:"⚠️ Please enter full patient name (first & last)."
+        reply: "⚠️ Please enter full patient name (first & last)."
       })
     }
 
@@ -103,15 +109,15 @@ export async function POST(req: Request) {
        PHONE
     ==================================================== */
 
-    if(!phone){
+    if (!phone) {
       return Response.json({
-        reply:"📱 Please enter mobile number."
+        reply: "📱 Please enter mobile number."
       })
     }
 
-    if(!phoneRegex.test(phone)){
+    if (!phoneRegex.test(phone)) {
       return Response.json({
-        reply:"⚠️ Please enter a valid phone number."
+        reply: "⚠️ Please enter a valid phone number."
       })
     }
 
@@ -119,7 +125,7 @@ export async function POST(req: Request) {
        REGISTER / GET PATIENT
     ==================================================== */
 
-    let patientRecord
+    let patientRecord: any
 
     const { resources: existing } =
       await patientsContainer.items.query({
@@ -127,10 +133,10 @@ export async function POST(req: Request) {
         parameters: [{ name: "@phone", value: phone }]
       }).fetchAll()
 
-    if(existing.length > 0){
+    if (existing.length > 0) {
       patientRecord = existing[0]
 
-      if(!symptoms){
+      if (!symptoms) {
         return Response.json({
           reply: `
 👤 Patient already registered
@@ -141,9 +147,7 @@ export async function POST(req: Request) {
 `
         })
       }
-
     } else {
-
       patientRecord = {
         id: "PAT-" + Date.now(),
         name,
@@ -168,24 +172,33 @@ export async function POST(req: Request) {
        SYMPTOMS
     ==================================================== */
 
-    if(!symptoms){
+    if (!symptoms) {
       return Response.json({
-        reply:"🩺 Please describe your symptoms."
+        reply: "🩺 Please describe your symptoms."
       })
     }
 
     /* ====================================================
-       FLEXIBLE TRIAGE (NON-BLOCKING)
+       FLEXIBLE TRIAGE
     ==================================================== */
 
-    const textHistory = userMessages.map((m:any)=>m.content.toLowerCase())
+    const textHistory: string[] = userMessages.map((m) =>
+      m.content.toLowerCase()
+    )
 
     const hasAnyTriageInfo =
-      textHistory.some(t => /\d+/.test(t)) ||
-      textHistory.some(t => t.includes("fever") || t.includes("pain")) ||
-      textHistory.some(t => t.includes("better") || t.includes("worse") || t.includes("improving"))
+      textHistory.some((t: string) => /\d+/.test(t)) ||
+      textHistory.some(
+        (t: string) => t.includes("fever") || t.includes("pain")
+      ) ||
+      textHistory.some(
+        (t: string) =>
+          t.includes("better") ||
+          t.includes("worse") ||
+          t.includes("improving")
+      )
 
-    if(!hasAnyTriageInfo){
+    if (!hasAnyTriageInfo) {
       return Response.json({
         reply: `
 🩺 I understand you have: "${symptoms}"
@@ -202,17 +215,14 @@ Or I can help you book a doctor directly.
     }
 
     /* ====================================================
-       ASK FOR BOOKING (ONLY ONCE)
+       BOOKING FLOW
     ==================================================== */
 
-    const wantsBooking =
-      lastMessage.toLowerCase().includes("yes") ||
-      lastMessage.toLowerCase().includes("book")
+    const alreadyAskedBooking = messages.some(
+      (m) => m.role === "assistant" && m.content.includes("schedule")
+    )
 
-    const alreadyAskedBooking =
-      messages.some((m:any)=>m.role==="assistant" && m.content.includes("schedule"))
-
-    if(!alreadyAskedBooking){
+    if (!alreadyAskedBooking) {
       return Response.json({
         reply: `
 🧠 Based on your symptoms, consulting a doctor is recommended.
@@ -222,9 +232,9 @@ Would you like me to schedule an appointment? (yes/no)
       })
     }
 
-    if(lastMessage.toLowerCase().includes("no")){
+    if (lastMessage.toLowerCase().includes("no")) {
       return Response.json({
-        reply:"👍 No problem. Let me know if you need anything else."
+        reply: "👍 No problem. Let me know if you need anything else."
       })
     }
 
@@ -236,23 +246,26 @@ Would you like me to schedule an appointment? (yes/no)
 
     const { resources } =
       await doctorsContainer.items.query({
-        query:"SELECT * FROM c WHERE c.specialty=@s AND c.available=true",
-        parameters:[{ name:"@s", value:specialty }]
+        query:
+          "SELECT * FROM c WHERE c.specialty=@s AND c.available=true",
+        parameters: [{ name: "@s", value: specialty }]
       }).fetchAll()
 
-    if(resources.length === 0){
+    if (resources.length === 0) {
       return Response.json({
-        reply:`⚠️ No ${specialty} available.`
+        reply: `⚠️ No ${specialty} available.`
       })
     }
 
-    /* ---------- GROUP DOCTORS ---------- */
+    const grouped: Record<string, any[]> = {}
 
-    const grouped:any = {}
-
-    resources.forEach((d:any)=>{
-      if(!grouped[d.name]) grouped[d.name]=[]
-      grouped[d.name].push({ id:d.id, slot:d.slot, specialty:d.specialty })
+    resources.forEach((d: any) => {
+      if (!grouped[d.name]) grouped[d.name] = []
+      grouped[d.name].push({
+        id: d.id,
+        slot: d.slot,
+        specialty: d.specialty
+      })
     })
 
     const entries = Object.entries(grouped)
@@ -263,19 +276,18 @@ Would you like me to schedule an appointment? (yes/no)
 
     const doctorMatch = lastMessage.match(/^(\d+)$/)
 
-    if(doctorMatch){
-
+    if (doctorMatch) {
       const i = parseInt(doctorMatch[1]) - 1
-      const [docName, slots]:any = entries[i]
+      const [docName, slots]: any = entries[i]
 
-      if(!docName){
-        return Response.json({ reply:"Invalid doctor selection." })
+      if (!docName) {
+        return Response.json({ reply: "Invalid doctor selection." })
       }
 
       let reply = `👨‍⚕️ ${docName} Slots:\n\n`
 
-      slots.forEach((s:any,j:number)=>{
-        reply += `${i+1}.${j+1} → ${s.slot}\n`
+      slots.forEach((s: any, j: number) => {
+        reply += `${i + 1}.${j + 1} → ${s.slot}\n`
       })
 
       reply += "\n👉 Reply with slot (e.g., 2.1)"
@@ -284,21 +296,20 @@ Would you like me to schedule an appointment? (yes/no)
     }
 
     /* ====================================================
-       SLOT SELECT + BOOK
+       SLOT SELECT
     ==================================================== */
 
     const slotMatch = lastMessage.match(/^(\d+)\.(\d+)$/)
 
-    if(slotMatch){
-
+    if (slotMatch) {
       const di = parseInt(slotMatch[1]) - 1
       const si = parseInt(slotMatch[2]) - 1
 
-      const [docName, slots]:any = entries[di]
+      const [docName, slots]: any = entries[di]
       const slot = slots?.[si]
 
-      if(!slot){
-        return Response.json({ reply:"Invalid selection." })
+      if (!slot) {
+        return Response.json({ reply: "Invalid selection." })
       }
 
       const appointmentId = "QC-" + Date.now()
@@ -316,11 +327,11 @@ Would you like me to schedule an appointment? (yes/no)
         appointmentDate: new Date().toISOString()
       })
 
-      const doc = resources.find((r:any)=>r.id===slot.id)
+      const doc = resources.find((r: any) => r.id === slot.id)
 
       await doctorsContainer
         .item(doc.id, doc.specialty)
-        .replace({ ...doc, available:false })
+        .replace({ ...doc, available: false })
 
       return Response.json({
         reply: `
@@ -343,10 +354,10 @@ Would you like me to schedule an appointment? (yes/no)
 
     let reply = `👨‍⚕️ Available ${specialty}s:\n\n`
 
-    entries.forEach(([name, slots]:any, i:number)=>{
-      reply += `${i+1}. ${name}\n`
-      slots.forEach((s:any,j:number)=>{
-        reply += `   (${i+1}.${j+1}) ${s.slot}\n`
+    entries.forEach(([name, slots]: any, i: number) => {
+      reply += `${i + 1}. ${name}\n`
+      slots.forEach((s: any, j: number) => {
+        reply += `   (${i + 1}.${j + 1}) ${s.slot}\n`
       })
       reply += "\n"
     })
@@ -355,7 +366,7 @@ Would you like me to schedule an appointment? (yes/no)
 
     return Response.json({ reply })
 
-  } catch(err:any){
+  } catch (err: any) {
     console.error(err)
     return Response.json({
       reply: "Error: " + err.message

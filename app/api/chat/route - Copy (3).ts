@@ -54,28 +54,20 @@ export async function POST(req: Request) {
     let symptoms = ""
 
     for (const m of userMessages) {
-      const text = m.content.trim().toLowerCase()
+      const text = m.content.trim()
 
       if (!name && text.split(" ").length >= 2 && !phoneRegex.test(text)) {
-        name = m.content
+        name = text
       } 
       else if (!phone && phoneRegex.test(text)) {
-        phone = m.content
+        phone = text
       } 
-      else if (
-        name && phone &&
-        !phoneRegex.test(text) &&
-        !["yes","no"].includes(text) &&
-        !text.match(/^\d+$/) &&
-        !text.match(/^\d+\.\d+$/)
-      ) {
-        symptoms = m.content
+      else if (name && phone && !phoneRegex.test(text)) {
+        symptoms = text
       }
     }
 
-    /* ====================================================
-       GREETING
-    ==================================================== */
+    /* ---------- GREETING ---------- */
 
     if(greetings.includes(lastMessage.toLowerCase())){
       return Response.json({
@@ -83,9 +75,7 @@ export async function POST(req: Request) {
       })
     }
 
-    /* ====================================================
-       NAME
-    ==================================================== */
+    /* ---------- STEP 1: NAME ---------- */
 
     if(!name){
       return Response.json({
@@ -99,9 +89,7 @@ export async function POST(req: Request) {
       })
     }
 
-    /* ====================================================
-       PHONE
-    ==================================================== */
+    /* ---------- STEP 2: PHONE ---------- */
 
     if(!phone){
       return Response.json({
@@ -116,16 +104,18 @@ export async function POST(req: Request) {
     }
 
     /* ====================================================
-       REGISTER / GET PATIENT
+       STEP 3: REGISTER / GET PATIENT (IMMEDIATE)
     ==================================================== */
 
     let patientRecord
 
+    const existingQuery = {
+      query: "SELECT * FROM c WHERE c.phone=@phone",
+      parameters: [{ name: "@phone", value: phone }]
+    }
+
     const { resources: existing } =
-      await patientsContainer.items.query({
-        query: "SELECT * FROM c WHERE c.phone=@phone",
-        parameters: [{ name: "@phone", value: phone }]
-      }).fetchAll()
+      await patientsContainer.items.query(existingQuery).fetchAll()
 
     if(existing.length > 0){
       patientRecord = existing[0]
@@ -155,7 +145,7 @@ export async function POST(req: Request) {
 
       return Response.json({
         reply: `
-✅ Patient Registered
+✅ Patient Registered Successfully
 
 🆔 Patient ID: ${patientRecord.id}
 
@@ -164,9 +154,7 @@ export async function POST(req: Request) {
       })
     }
 
-    /* ====================================================
-       SYMPTOMS
-    ==================================================== */
+    /* ---------- STEP 4: SYMPTOMS ---------- */
 
     if(!symptoms){
       return Response.json({
@@ -175,69 +163,15 @@ export async function POST(req: Request) {
     }
 
     /* ====================================================
-       FLEXIBLE TRIAGE (NON-BLOCKING)
-    ==================================================== */
-
-    const textHistory = userMessages.map((m:any)=>m.content.toLowerCase())
-
-    const hasAnyTriageInfo =
-      textHistory.some(t => /\d+/.test(t)) ||
-      textHistory.some(t => t.includes("fever") || t.includes("pain")) ||
-      textHistory.some(t => t.includes("better") || t.includes("worse") || t.includes("improving"))
-
-    if(!hasAnyTriageInfo){
-      return Response.json({
-        reply: `
-🩺 I understand you have: "${symptoms}"
-
-If possible, share more details:
-
-• Duration (days)
-• Fever or pain
-• Improving or worsening
-
-Or I can help you book a doctor directly.
-`
-      })
-    }
-
-    /* ====================================================
-       ASK FOR BOOKING (ONLY ONCE)
-    ==================================================== */
-
-    const wantsBooking =
-      lastMessage.toLowerCase().includes("yes") ||
-      lastMessage.toLowerCase().includes("book")
-
-    const alreadyAskedBooking =
-      messages.some((m:any)=>m.role==="assistant" && m.content.includes("schedule"))
-
-    if(!alreadyAskedBooking){
-      return Response.json({
-        reply: `
-🧠 Based on your symptoms, consulting a doctor is recommended.
-
-Would you like me to schedule an appointment? (yes/no)
-`
-      })
-    }
-
-    if(lastMessage.toLowerCase().includes("no")){
-      return Response.json({
-        reply:"👍 No problem. Let me know if you need anything else."
-      })
-    }
-
-    /* ====================================================
-       FETCH DOCTORS
+       STEP 5: FETCH DOCTORS
     ==================================================== */
 
     const specialty = detectSpecialty(symptoms)
 
     const { resources } =
       await doctorsContainer.items.query({
-        query:"SELECT * FROM c WHERE c.specialty=@s AND c.available=true",
-        parameters:[{ name:"@s", value:specialty }]
+        query:"SELECT * FROM c WHERE c.specialty=@specialty AND c.available=true",
+        parameters:[{ name:"@specialty", value:specialty }]
       }).fetchAll()
 
     if(resources.length === 0){
@@ -258,7 +192,7 @@ Would you like me to schedule an appointment? (yes/no)
     const entries = Object.entries(grouped)
 
     /* ====================================================
-       DOCTOR SELECT
+       STEP 6: DOCTOR SELECT
     ==================================================== */
 
     const doctorMatch = lastMessage.match(/^(\d+)$/)
@@ -278,13 +212,13 @@ Would you like me to schedule an appointment? (yes/no)
         reply += `${i+1}.${j+1} → ${s.slot}\n`
       })
 
-      reply += "\n👉 Reply with slot (e.g., 2.1)"
+      reply += "\n👉 Reply with slot number (e.g., 2.1)"
 
       return Response.json({ reply })
     }
 
     /* ====================================================
-       SLOT SELECT + BOOK
+       STEP 7: SLOT SELECT + BOOK
     ==================================================== */
 
     const slotMatch = lastMessage.match(/^(\d+)\.(\d+)$/)
@@ -297,24 +231,35 @@ Would you like me to schedule an appointment? (yes/no)
       const [docName, slots]:any = entries[di]
       const slot = slots?.[si]
 
-      if(!slot){
+      if(!docName || !slot){
         return Response.json({ reply:"Invalid selection." })
       }
 
+      /* ---------- CREATE APPOINTMENT ---------- */
+
       const appointmentId = "QC-" + Date.now()
 
-      await appointmentsContainer.items.create({
+      const appointment = {
         id: appointmentId,
         patientId: patientRecord.id,
-        name,
-        phone,
+
+        name: patientRecord.name,
+        phone: patientRecord.phone,
+
         symptoms,
+
         doctorId: slot.id,
         doctorName: docName,
         specialty,
         slot: slot.slot,
-        appointmentDate: new Date().toISOString()
-      })
+
+        appointmentDate: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      }
+
+      await appointmentsContainer.items.create(appointment)
+
+      /* ---------- UPDATE DOCTOR SLOT ---------- */
 
       const doc = resources.find((r:any)=>r.id===slot.id)
 
@@ -329,6 +274,9 @@ Would you like me to schedule an appointment? (yes/no)
 🆔 Patient ID: ${patientRecord.id}
 📌 Reference ID: ${appointmentId}
 
+👤 ${patientRecord.name}
+📱 ${patientRecord.phone}
+
 👨‍⚕️ ${docName}
 ⏰ ${slot.slot}
 
@@ -338,7 +286,7 @@ Would you like me to schedule an appointment? (yes/no)
     }
 
     /* ====================================================
-       SHOW DOCTORS
+       STEP 8: SHOW DOCTORS
     ==================================================== */
 
     let reply = `👨‍⚕️ Available ${specialty}s:\n\n`
@@ -351,7 +299,8 @@ Would you like me to schedule an appointment? (yes/no)
       reply += "\n"
     })
 
-    reply += "👉 Select doctor (e.g., 2)\n👉 Then slot (e.g., 2.1)"
+    reply += "👉 Step 1: Select doctor (e.g., 2)\n"
+    reply += "👉 Step 2: Select slot (e.g., 2.1)"
 
     return Response.json({ reply })
 

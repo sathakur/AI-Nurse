@@ -103,7 +103,7 @@ How can I help?`
       ])
 
     }catch(err){
-      await delay(1500)
+      await delay(1000)
 
       setMessages(prev=>[
         ...prev,

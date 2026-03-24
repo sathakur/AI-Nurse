@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 
 type Message = {
   role: "user" | "assistant"
-  text: string
+  content: string
 }
 
 export default function Home() {
@@ -29,7 +29,7 @@ export default function Home() {
         setMessages([
           {
             role:"assistant",
-            text:`👩‍⚕️ Hello! I'm AI triage assistant at QuantumCare Hospital.
+            content:`👩‍⚕️ Hello! I'm AI triage assistant at QuantumCare Hospital.
 
 I can help you with:
 
@@ -45,7 +45,7 @@ How can I assist you today?`
         setMessages([
           {
             role:"assistant",
-            text:`🧑‍💼 Admin Assistant Ready.
+            content:`🧑‍💼 Admin Assistant Ready.
 
 • Show today's appointments
 • Show tomorrow bookings
@@ -67,9 +67,9 @@ How can I help?`
 
     const userMessage = input
 
-    const updatedMessages = [
+    const updatedMessages: Message[] = [
       ...messages,
-      {role:"user",text:userMessage}
+      {role:"user",content:userMessage}
     ]
 
     setMessages(updatedMessages)
@@ -85,21 +85,17 @@ How can I help?`
         },
         body:JSON.stringify({
           mode,
-          messages: updatedMessages.map(m => ({
-            role:m.role,
-            content:m.text
-          }))
+          messages: updatedMessages
         })
       })
 
       const data = await res.json()
 
-      // ✅ Artificial delay (1 sec)
       await delay(1000)
 
       setMessages(prev=>[
         ...prev,
-        {role:"assistant",text:data.reply}
+        {role:"assistant",content:data.reply}
       ])
 
     }catch(err){
@@ -107,7 +103,7 @@ How can I help?`
 
       setMessages(prev=>[
         ...prev,
-        {role:"assistant",text:"AI service error."}
+        {role:"assistant",content:"AI service error."}
       ])
     }
 
@@ -150,7 +146,6 @@ How can I help?`
         </p>
       </div>
 
-      {/* Mode Switch */}
       <div
         onClick={toggleMode}
         className="fixed bottom-6 right-44 bg-gray-900/80 backdrop-blur px-5 py-2 rounded-full cursor-pointer shadow-lg text-white hover:scale-105 transition"
@@ -158,7 +153,6 @@ How can I help?`
         {mode==="patient" ? "Admin Mode" : "Patient Mode"}
       </div>
 
-      {/* Chat Button */}
       <div
         onClick={()=> open ? closeChat() : setOpen(true)}
         className="fixed bottom-6 right-6 bg-gradient-to-r from-blue-600 to-indigo-600 
@@ -168,13 +162,11 @@ How can I help?`
         {open ? "Close" : "AI Nurse"}
       </div>
 
-      {/* Chat Window */}
       {open && (
         <div className="fixed bottom-24 right-6 w-[380px] h-[600px] 
         bg-white/70 backdrop-blur-2xl rounded-2xl shadow-2xl 
         flex flex-col border border-white/20 animate-fadeIn overflow-hidden">
 
-          {/* HEADER */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 
           text-white p-4 flex justify-between items-center">
             <div>
@@ -186,7 +178,6 @@ How can I help?`
             <button onClick={closeChat} className="text-white text-xl">✕</button>
           </div>
 
-          {/* MESSAGES */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
             {messages.map((m,i)=>(
@@ -206,9 +197,8 @@ How can I help?`
                     : "bg-white text-gray-800 border rounded-bl-md"
                 }`}>
 
-                  {/* FIXED TEXT */}
                   <div className="whitespace-pre-wrap leading-relaxed">
-                    {m.text.split("\n").map((line, idx) => (
+                    {m.content.split("\n").map((line, idx) => (
                       <div key={idx} className="flex gap-2 items-start break-words">
                         {line.startsWith("•") ? (
                           <>
@@ -233,7 +223,6 @@ How can I help?`
               </div>
             ))}
 
-            {/* ✅ PROFESSIONAL TYPING */}
             {loading && (
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm">
@@ -253,7 +242,6 @@ How can I help?`
             <div ref={chatEndRef}></div>
           </div>
 
-          {/* INPUT */}
           <div className="p-3 border-t bg-white/80 backdrop-blur flex items-center gap-2">
             <input
               className="flex-1 px-4 py-2 rounded-full border 
